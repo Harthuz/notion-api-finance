@@ -74,3 +74,15 @@ NOTION_DATABASE_ID=seu_id_do_banco_de_dados_aqui
    npm run dev
    ```
    O frontend estará disponível em `http://localhost:5173`.
+
+### 3. Executando via Docker (Orquestração Completa)
+
+Se você possuir o **Docker** e o **Docker Compose** instalados na sua máquina:
+
+1. Na raiz do projeto, execute o comando:
+   ```bash
+   docker compose up --build
+   ```
+2. Acesse as aplicações:
+   - **Frontend:** `http://localhost` (na porta padrão 80)
+   - **Backend:** `http://localhost:8000`

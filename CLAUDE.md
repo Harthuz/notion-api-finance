@@ -18,6 +18,10 @@ Este arquivo serve como guia rápido para comandos comuns e regras de estilo do 
 - **Gerar Build de Produção:** `npm run build`
 - **Executar Linter:** `npm run lint`
 
+### Docker
+- **Subir a aplicação completa:** `docker compose up --build`
+- **Parar e remover os containers:** `docker compose down`
+
 ## Estilo de Código e Diretrizes
 
 ### Backend (Python)
