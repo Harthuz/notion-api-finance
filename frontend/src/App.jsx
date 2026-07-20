@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   PieChart, 
   Pie, 
@@ -69,11 +69,172 @@ const gerarCorPorString = (str) => {
   };
 };
 
+function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
+  const [form, setForm] = useState({
+    nome: '',
+    valor: '',
+    tipo: metadados.tipos[0] || '',
+    conta: metadados.contas[0] || '',
+    data: new Date().toISOString().split('T')[0]
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  // Garante valores padrão quando os metadados são carregados assincronamente
+  useEffect(() => {
+    if (metadados.tipos.length > 0 && !form.tipo) {
+      setForm(prev => ({ ...prev, tipo: metadados.tipos[0] }));
+    }
+    if (metadados.contas.length > 0 && !form.conta) {
+      setForm(prev => ({ ...prev, conta: metadados.contas[0] }));
+    }
+  }, [metadados]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.nome || !form.valor || !form.tipo || !form.conta || !form.data) {
+      onCancel('Por favor, preencha todos os campos.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8000/api/gastos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: form.nome,
+          valor: parseFloat(form.valor),
+          tipo: form.tipo,
+          conta: form.conta,
+          data: form.data
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Erro ao cadastrar gasto');
+      }
+
+      setForm(prev => ({
+        ...prev,
+        nome: '',
+        valor: ''
+      }));
+      onSuccess('Gasto cadastrado com sucesso no Notion!');
+    } catch (error) {
+      console.error(error);
+      onCancel(error.message || 'Erro ao enviar dados para o Notion.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.2 }}>
+      <TextField
+        label="Descrição / Item"
+        name="nome"
+        variant="outlined"
+        size="small"
+        placeholder="Ex: Parcela do celular, Mercado, etc."
+        value={form.nome}
+        onChange={handleInputChange}
+        required
+        fullWidth
+      />
+
+      <TextField
+        label="Valor (R$)"
+        name="valor"
+        type="number"
+        variant="outlined"
+        size="small"
+        placeholder="0,00"
+        value={form.valor}
+        onChange={handleInputChange}
+        required
+        fullWidth
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <MoneyIcon size={18} sx={{ color: 'text.secondary' }} style={{ marginRight: '4px' }} />
+            </InputAdornment>
+          ),
+        }}
+      />
+
+      <FormControl fullWidth size="small" required>
+        <InputLabel shrink htmlFor="cadastro-data">Data de Competência</InputLabel>
+        <OutlinedInput
+          id="cadastro-data"
+          name="data"
+          type="date"
+          notched
+          label="Data de Competência"
+          value={form.data}
+          onChange={handleInputChange}
+          startAdornment={
+            <InputAdornment position="start">
+              <CalendarIcon size={18} sx={{ color: 'text.secondary' }} style={{ marginRight: '8px' }} />
+            </InputAdornment>
+          }
+        />
+      </FormControl>
+
+      <FormControl fullWidth size="small" required>
+        <InputLabel id="label-tipo">Categoria (Tipo)</InputLabel>
+        <Select
+          labelId="label-tipo"
+          name="tipo"
+          value={form.tipo}
+          label="Categoria (Tipo)"
+          onChange={handleInputChange}
+        >
+          {metadados.tipos.map(t => (
+            <MenuItem key={t} value={t}>{t}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      <FormControl fullWidth size="small" required>
+        <InputLabel id="label-conta">Conta Financeira</InputLabel>
+        <Select
+          labelId="label-conta"
+          name="conta"
+          value={form.conta}
+          label="Conta Financeira"
+          onChange={handleInputChange}
+        >
+          {metadados.contas.map(c => (
+            <MenuItem key={c} value={c}>{c}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      <Button 
+        type="submit" 
+        variant="contained" 
+        color="primary" 
+        disabled={submitting}
+        startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <AddCircleIcon />}
+        fullWidth
+        sx={{ mt: 0.5, py: 1.1 }}
+      >
+        {submitting ? 'Salvando...' : 'Adicionar Gasto'}
+      </Button>
+    </Box>
+  );
+}
+
 export default function App() {
   const [gastos, setGastos] = useState([]);
   const [metadados, setMetadados] = useState({ tipos: [], contas: [] });
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   
   // Filtros
@@ -97,15 +258,6 @@ export default function App() {
   useEffect(() => {
     setLimiteExibicao(20);
   }, [filtroDataDe, filtroDataAte, selectedTipos, selectedContas]);
-
-  // Form de cadastro
-  const [form, setForm] = useState({
-    nome: '',
-    valor: '',
-    tipo: '',
-    conta: '',
-    data: new Date().toISOString().split('T')[0]
-  });
 
   // Notificações Snackbar (MUI Toast)
   const [snackbar, setSnackbar] = useState({
@@ -136,13 +288,6 @@ export default function App() {
       const dataMeta = await resMeta.json();
       setMetadados(dataMeta);
 
-      if (dataMeta.tipos.length > 0 && !form.tipo) {
-        setForm(prev => ({ ...prev, tipo: dataMeta.tipos[0] }));
-      }
-      if (dataMeta.contas.length > 0 && !form.conta) {
-        setForm(prev => ({ ...prev, conta: dataMeta.contas[0] }));
-      }
-
     } catch (error) {
       console.error(error);
       showToast('Erro ao carregar dados do Notion. Verifique se o backend está ativo.', 'error');
@@ -155,53 +300,6 @@ export default function App() {
   useEffect(() => {
     fetchDados();
   }, []);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.nome || !form.valor || !form.tipo || !form.conta || !form.data) {
-      showToast('Por favor, preencha todos os campos.', 'error');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const res = await fetch(`http://${window.location.hostname}:8000/api/gastos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nome: form.nome,
-          valor: parseFloat(form.valor),
-          tipo: form.tipo,
-          conta: form.conta,
-          data: form.data
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || 'Erro ao cadastrar gasto');
-      }
-
-      showToast('Gasto cadastrado com sucesso no Notion!');
-      setFormAberto(false);
-      setForm(prev => ({
-        ...prev,
-        nome: '',
-        valor: ''
-      }));
-      fetchDados(false);
-    } catch (error) {
-      console.error(error);
-      showToast(error.message || 'Erro ao enviar dados para o Notion.', 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const handleExportCSV = () => {
     window.open(`http://${window.location.hostname}:8000/api/exportar`, '_blank');
@@ -236,40 +334,51 @@ export default function App() {
     showToast('Filtros redefinidos com sucesso');
   };
 
-  // Filtragem local
-  const gastosFiltrados = gastos.filter(g => {
-    if (filtroDataDe && g.data < filtroDataDe) return false;
-    if (filtroDataAte && g.data > filtroDataAte) return false;
-    if (selectedTipos.length > 0 && !selectedTipos.includes(g.tipo)) return false;
-    if (selectedContas.length > 0 && !selectedContas.includes(g.conta)) return false;
-    return true;
-  });
+  // Filtragem local memorizada
+  const gastosFiltrados = useMemo(() => {
+    return gastos.filter(g => {
+      if (filtroDataDe && g.data < filtroDataDe) return false;
+      if (filtroDataAte && g.data > filtroDataAte) return false;
+      if (selectedTipos.length > 0 && !selectedTipos.includes(g.tipo)) return false;
+      if (selectedContas.length > 0 && !selectedContas.includes(g.conta)) return false;
+      return true;
+    });
+  }, [gastos, filtroDataDe, filtroDataAte, selectedTipos, selectedContas]);
 
-  const valorTotal = gastosFiltrados.reduce((sum, g) => sum + g.valor, 0);
+  const valorTotal = useMemo(() => {
+    return gastosFiltrados.reduce((sum, g) => sum + g.valor, 0);
+  }, [gastosFiltrados]);
 
-  // Ordena os gastos por data (descrescente por padrão, ou crescente se selecionado)
-  const gastosOrdenados = [...gastosFiltrados].sort((a, b) => {
-    const dataA = a.data || '';
-    const dataB = b.data || '';
-    if (dataA < dataB) return ordemDirecao === 'asc' ? -1 : 1;
-    if (dataA > dataB) return ordemDirecao === 'asc' ? 1 : -1;
-    return 0;
-  });
+  // Ordena os gastos por data memorizado
+  const gastosOrdenados = useMemo(() => {
+    return [...gastosFiltrados].sort((a, b) => {
+      const dataA = a.data || '';
+      const dataB = b.data || '';
+      if (dataA < dataB) return ordemDirecao === 'asc' ? -1 : 1;
+      if (dataA > dataB) return ordemDirecao === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [gastosFiltrados, ordemDirecao]);
 
-  // Fatiamento de exibição limite de 20
-  const gastosExibidos = gastosOrdenados.slice(0, limiteExibicao);
+  // Fatiamento de exibição limite de 20 (baseado na paginação)
+  const gastosExibidos = useMemo(() => {
+    return gastosOrdenados.slice(0, limiteExibicao);
+  }, [gastosOrdenados, limiteExibicao]);
 
-  // Dados do gráfico
-  const dadosGrafico = Object.entries(
-    gastosFiltrados.reduce((acc, g) => {
+  // Agrupamento de dados do gráfico memorizado
+  const dadosGrafico = useMemo(() => {
+    const agrupado = gastosFiltrados.reduce((acc, g) => {
       const cat = g.tipo || 'Sem Categoria';
       acc[cat] = (acc[cat] || 0) + g.valor;
       return acc;
-    }, {})
-  ).map(([name, value]) => ({
-    name,
-    value: Number(value.toFixed(2))
-  })).sort((a, b) => b.value - a.value);
+    }, {});
+    return Object.entries(agrupado)
+      .map(([name, value]) => ({
+        name,
+        value: Number(value.toFixed(2))
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [gastosFiltrados]);
 
   return (
     <Container maxWidth="lg" sx={{ py: 5 }}>
@@ -317,39 +426,39 @@ export default function App() {
         </Box>
       ) : (
         <>
-          {/* Somatórios rápidos - 100% Horizontal em qualquer tela */}
+          {/* Somatórios rápidos */}
           <Grid container spacing={3} sx={{ mb: 4 }}>
-            <Grid item xs={4}>
+            <Grid item xs={12} sm={4}>
               <Card sx={{ bgcolor: 'primary.main', color: 'primary.contrastText' }}>
-                <CardContent sx={{ textAlign: 'center', py: 3, px: { xs: 1, sm: 2 } }}>
-                  <Typography variant="body2" sx={{ opacity: 0.8, mb: 1, textTransform: 'uppercase', letterSpacing: 1, fontSize: { xs: '0.65rem', sm: '0.8rem' } }}>
-                    Gasto Total
+                <CardContent sx={{ textAlign: 'center', py: 3 }}>
+                  <Typography variant="body2" sx={{ opacity: 0.8, mb: 1, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Gasto Total Filtrado
                   </Typography>
-                  <Typography variant="h4" component="span" sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.7rem', md: '2.1rem' } }}>
-                    R$ {valorTotal.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={4}>
-              <Card>
-                <CardContent sx={{ textAlign: 'center', py: 3, px: { xs: 1, sm: 2 } }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, textTransform: 'uppercase', letterSpacing: 1, fontSize: { xs: '0.65rem', sm: '0.8rem' } }}>
-                    Transações
-                  </Typography>
-                  <Typography variant="h4" component="span" color="primary.main" sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.7rem', md: '2.1rem' } }}>
-                    {gastosFiltrados.length} <Typography variant="body2" component="span" color="text.secondary" sx={{ display: { xs: 'none', sm: 'inline' } }}>de {gastos.length}</Typography>
+                  <Typography variant="h4" component="span" sx={{ fontWeight: 700 }}>
+                    R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </Typography>
                 </CardContent>
               </Card>
             </Grid>
-            <Grid item xs={4}>
+            <Grid item xs={12} sm={4}>
               <Card>
-                <CardContent sx={{ textAlign: 'center', py: 3, px: { xs: 1, sm: 2 } }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, textTransform: 'uppercase', letterSpacing: 1, fontSize: { xs: '0.65rem', sm: '0.8rem' } }}>
-                    Categorias
+                <CardContent sx={{ textAlign: 'center', py: 3 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Transações Exibidas
                   </Typography>
-                  <Typography variant="h4" component="span" color="primary.main" sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.7rem', md: '2.1rem' } }}>
+                  <Typography variant="h4" component="span" color="primary.main" sx={{ fontWeight: 700 }}>
+                    {gastosFiltrados.length} <Typography variant="body2" component="span" color="text.secondary">de {gastos.length}</Typography>
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center', py: 3 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Categorias Ativas
+                  </Typography>
+                  <Typography variant="h4" component="span" color="primary.main" sx={{ fontWeight: 700 }}>
                     {dadosGrafico.length}
                   </Typography>
                 </CardContent>
@@ -733,99 +842,17 @@ export default function App() {
               </Typography>
             </Box>
 
-            <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.2 }}>
-              <TextField
-                label="Descrição / Item"
-                name="nome"
-                variant="outlined"
-                size="small"
-                placeholder="Ex: Parcela do celular, Mercado, etc."
-                value={form.nome}
-                onChange={handleInputChange}
-                required
-                fullWidth
-              />
-
-              <TextField
-                label="Valor (R$)"
-                name="valor"
-                type="number"
-                variant="outlined"
-                size="small"
-                placeholder="0,00"
-                value={form.valor}
-                onChange={handleInputChange}
-                required
-                fullWidth
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <MoneyIcon size={18} sx={{ color: 'text.secondary' }} style={{ marginRight: '4px' }} />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-
-              <FormControl fullWidth size="small" required>
-                <InputLabel shrink htmlFor="cadastro-data">Data de Competência</InputLabel>
-                <OutlinedInput
-                  id="cadastro-data"
-                  name="data"
-                  type="date"
-                  notched
-                  label="Data de Competência"
-                  value={form.data}
-                  onChange={handleInputChange}
-                  startAdornment={
-                    <InputAdornment position="start">
-                      <CalendarIcon size={18} sx={{ color: 'text.secondary' }} style={{ marginRight: '8px' }} />
-                    </InputAdornment>
-                  }
-                />
-              </FormControl>
-
-              <FormControl fullWidth size="small" required>
-                <InputLabel id="label-tipo">Categoria (Tipo)</InputLabel>
-                <Select
-                  labelId="label-tipo"
-                  name="tipo"
-                  value={form.tipo}
-                  label="Categoria (Tipo)"
-                  onChange={handleInputChange}
-                >
-                  {metadados.tipos.map(t => (
-                    <MenuItem key={t} value={t}>{t}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <FormControl fullWidth size="small" required>
-                <InputLabel id="label-conta">Conta Financeira</InputLabel>
-                <Select
-                  labelId="label-conta"
-                  name="conta"
-                  value={form.conta}
-                  label="Conta Financeira"
-                  onChange={handleInputChange}
-                >
-                  {metadados.contas.map(c => (
-                    <MenuItem key={c} value={c}>{c}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <Button 
-                type="submit" 
-                variant="contained" 
-                color="primary" 
-                disabled={submitting}
-                startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <AddCircleIcon />}
-                fullWidth
-                sx={{ mt: 0.5, py: 1.1 }}
-              >
-                {submitting ? 'Salvando...' : 'Adicionar Gasto'}
-              </Button>
-            </Box>
+            <CadastroGastoForm
+              metadados={metadados}
+              onSuccess={(msg) => {
+                showToast(msg);
+                setFormAberto(false);
+                fetchDados(false);
+              }}
+              onCancel={(msg) => {
+                showToast(msg, 'error');
+              }}
+            />
           </CardContent>
         </Card>
       </Zoom>
