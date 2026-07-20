@@ -11,6 +11,10 @@ sys.stdout.reconfigure(encoding='utf-8')
 # Carrega variáveis do .env
 load_dotenv()
 
+# Caso não encontre as variáveis no local atual, tenta buscar no diretório pai (raiz do projeto)
+if not os.getenv("NOTION_TOKEN"):
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 
