@@ -16,6 +16,7 @@ import {
   Button,
   TextField,
   Select,
+  Menu,
   MenuItem,
   InputLabel,
   FormControl,
@@ -35,7 +36,12 @@ import {
   CircularProgress,
   TableSortLabel,
   Fab,
-  Zoom
+  Zoom,
+  Autocomplete,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import AddCircleIcon from '@mui/icons-material/AddCircleOutlined';
 import DownloadIcon from '@mui/icons-material/CloudDownload';
@@ -48,6 +54,8 @@ import SyncIcon from '@mui/icons-material/Sync';
 import ResetIcon from '@mui/icons-material/RestartAlt';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 
 const COLORS = [
   '#2E5A44', '#3E7D5C', '#556B2F', '#8FBC8F', '#4E785F',
@@ -69,7 +77,7 @@ const gerarCorPorString = (str) => {
   };
 };
 
-function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
+function CadastroGastoForm({ metadados, onSuccess, onCancel, gastoParaEditar }) {
   const [form, setForm] = useState({
     nome: '',
     valor: '',
@@ -79,19 +87,92 @@ function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
   });
   const [submitting, setSubmitting] = useState(false);
 
-  // Garante valores padrão quando os metadados são carregados assincronamente
+  // Estados locais para as opções do Autocomplete dinâmico
+  const [opcoesTipos, setOpcoesTipos] = useState(metadados.tipos || []);
+  const [opcoesContas, setOpcoesContas] = useState(metadados.contas || []);
+
+  // Sincroniza metadados locais quando o pai atualizar (carregamento inicial)
   useEffect(() => {
-    if (metadados.tipos.length > 0 && !form.tipo) {
-      setForm(prev => ({ ...prev, tipo: metadados.tipos[0] }));
+    if (metadados.tipos && metadados.tipos.length > 0) {
+      setOpcoesTipos(metadados.tipos);
     }
-    if (metadados.contas.length > 0 && !form.conta) {
-      setForm(prev => ({ ...prev, conta: metadados.contas[0] }));
+    if (metadados.contas && metadados.contas.length > 0) {
+      setOpcoesContas(metadados.contas);
     }
   }, [metadados]);
+
+  // Carrega ou reseta os dados do formulário com base na presença de gastoParaEditar
+  useEffect(() => {
+    if (gastoParaEditar) {
+      setForm({
+        nome: gastoParaEditar.nome || '',
+        valor: gastoParaEditar.valor ? gastoParaEditar.valor.toString() : '',
+        tipo: gastoParaEditar.tipo || '',
+        conta: gastoParaEditar.conta || '',
+        data: gastoParaEditar.data || new Date().toISOString().split('T')[0]
+      });
+    } else {
+      setForm({
+        nome: '',
+        valor: '',
+        tipo: metadados.tipos[0] || '',
+        conta: metadados.contas[0] || '',
+        data: new Date().toISOString().split('T')[0]
+      });
+    }
+  }, [gastoParaEditar, metadados]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleTipoChange = (event, newValue) => {
+    const val = typeof newValue === 'string' ? newValue.trim() : newValue;
+    if (!val) {
+      setForm(prev => ({ ...prev, tipo: '' }));
+      return;
+    }
+
+    if (val !== form.tipo) {
+      const existe = opcoesTipos.some(t => t.toLowerCase() === val.toLowerCase());
+      if (!existe) {
+        const confirmar = window.confirm(`A Categoria "${val}" não existe. Deseja cadastrá-la no Notion?`);
+        if (confirmar) {
+          setOpcoesTipos(prev => [...prev, val].sort());
+          setForm(prev => ({ ...prev, tipo: val }));
+        } else {
+          setForm(prev => ({ ...prev, tipo: '' }));
+        }
+      } else {
+        const tipoExistente = opcoesTipos.find(t => t.toLowerCase() === val.toLowerCase()) || val;
+        setForm(prev => ({ ...prev, tipo: tipoExistente }));
+      }
+    }
+  };
+
+  const handleContaChange = (event, newValue) => {
+    const val = typeof newValue === 'string' ? newValue.trim() : newValue;
+    if (!val) {
+      setForm(prev => ({ ...prev, conta: '' }));
+      return;
+    }
+
+    if (val !== form.conta) {
+      const existe = opcoesContas.some(c => c.toLowerCase() === val.toLowerCase());
+      if (!existe) {
+        const confirmar = window.confirm(`A Conta Financeira "${val}" não existe. Deseja cadastrá-la no Notion?`);
+        if (confirmar) {
+          setOpcoesContas(prev => [...prev, val].sort());
+          setForm(prev => ({ ...prev, conta: val }));
+        } else {
+          setForm(prev => ({ ...prev, conta: '' }));
+        }
+      } else {
+        const contaExistente = opcoesContas.find(c => c.toLowerCase() === val.toLowerCase()) || val;
+        setForm(prev => ({ ...prev, conta: contaExistente }));
+      }
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -103,8 +184,14 @@ function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
 
     setSubmitting(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/api/gastos`, {
-        method: 'POST',
+      const url = gastoParaEditar
+        ? `http://${window.location.hostname}:8000/api/gastos/${gastoParaEditar.id}`
+        : `http://${window.location.hostname}:8000/api/gastos`;
+      
+      const method = gastoParaEditar ? 'PATCH' : 'POST';
+
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nome: form.nome,
@@ -117,7 +204,7 @@ function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.detail || 'Erro ao cadastrar gasto');
+        throw new Error(errData.detail || 'Erro ao salvar gasto');
       }
 
       setForm(prev => ({
@@ -125,7 +212,7 @@ function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
         nome: '',
         valor: ''
       }));
-      onSuccess('Gasto cadastrado com sucesso no Notion!');
+      onSuccess(gastoParaEditar ? 'Gasto atualizado com sucesso!' : 'Gasto cadastrado com sucesso no Notion!', !!gastoParaEditar);
     } catch (error) {
       console.error(error);
       onCancel(error.message || 'Erro ao enviar dados para o Notion.');
@@ -186,35 +273,49 @@ function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
         />
       </FormControl>
 
-      <FormControl fullWidth size="small" required>
-        <InputLabel id="label-tipo">Categoria (Tipo)</InputLabel>
-        <Select
-          labelId="label-tipo"
-          name="tipo"
-          value={form.tipo}
-          label="Categoria (Tipo)"
-          onChange={handleInputChange}
-        >
-          {metadados.tipos.map(t => (
-            <MenuItem key={t} value={t}>{t}</MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+      <Autocomplete
+        freeSolo
+        options={opcoesTipos}
+        value={form.tipo}
+        onChange={handleTipoChange}
+        onBlur={(e) => {
+          const val = e.target.value;
+          if (val) {
+            handleTipoChange(null, val);
+          }
+        }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Categoria (Tipo)"
+            size="small"
+            required
+            placeholder="Selecione ou digite..."
+          />
+        )}
+      />
 
-      <FormControl fullWidth size="small" required>
-        <InputLabel id="label-conta">Conta Financeira</InputLabel>
-        <Select
-          labelId="label-conta"
-          name="conta"
-          value={form.conta}
-          label="Conta Financeira"
-          onChange={handleInputChange}
-        >
-          {metadados.contas.map(c => (
-            <MenuItem key={c} value={c}>{c}</MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+      <Autocomplete
+        freeSolo
+        options={opcoesContas}
+        value={form.conta}
+        onChange={handleContaChange}
+        onBlur={(e) => {
+          const val = e.target.value;
+          if (val) {
+            handleContaChange(null, val);
+          }
+        }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Conta Financeira"
+            size="small"
+            required
+            placeholder="Selecione ou digite..."
+          />
+        )}
+      />
 
       <Button 
         type="submit" 
@@ -225,11 +326,12 @@ function CadastroGastoForm({ metadados, onSuccess, onCancel }) {
         fullWidth
         sx={{ mt: 0.5, py: 1.1 }}
       >
-        {submitting ? 'Salvando...' : 'Adicionar Gasto'}
+        {submitting ? 'Salvando...' : (gastoParaEditar ? 'Salvar Alterações' : 'Adicionar Gasto')}
       </Button>
     </Box>
   );
 }
+
 
 export default function App() {
   const [gastos, setGastos] = useState([]);
@@ -244,14 +346,71 @@ export default function App() {
   const [selectedContas, setSelectedContas] = useState([]);
 
   // Ordenação e Paginação de lançamentos
+  const [campoOrdenacao, setCampoOrdenacao] = useState('data'); // 'data' ou 'valor'
   const [ordemDirecao, setOrdemDirecao] = useState('desc'); // 'desc' = mais recente primeiro
   const [limiteExibicao, setLimiteExibicao] = useState(20);
 
   // Controle de visibilidade do formulário flutuante (Cadastro)
   const [formAberto, setFormAberto] = useState(false);
 
-  const toggleOrdenacaoData = () => {
-    setOrdemDirecao(prev => prev === 'asc' ? 'desc' : 'asc');
+  // Estados para gerenciamento do modal de detalhes e edição/exclusão
+  const [modalDetalhesAberto, setModalDetalhesAberto] = useState(false);
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [selectedGasto, setSelectedGasto] = useState(null);
+  const [gastoParaEditar, setGastoParaEditar] = useState(null);
+
+  const handleRowClick = (event, gasto) => {
+    setSelectedGasto(gasto);
+    setModalDetalhesAberto(true);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleEditarClick = () => {
+    setGastoParaEditar(selectedGasto);
+    setFormAberto(true);
+    handleMenuClose();
+  };
+
+  const handleEditarDoModal = () => {
+    setGastoParaEditar(selectedGasto);
+    setFormAberto(true);
+    setModalDetalhesAberto(false);
+  };
+
+  const handleExcluirClick = async () => {
+    if (!selectedGasto) return;
+    const confirmar = window.confirm(`Deseja realmente excluir o lançamento "${selectedGasto.nome}"?`);
+    if (confirmar) {
+      try {
+        const res = await fetch(`http://${window.location.hostname}:8000/api/gastos/${selectedGasto.id}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || 'Erro ao excluir lançamento');
+        }
+        showToast('Gasto excluído com sucesso!');
+        setModalDetalhesAberto(false);
+        setSelectedGasto(null);
+        fetchDados(false);
+      } catch (error) {
+        console.error(error);
+        showToast(error.message || 'Erro ao excluir gasto no Notion.', 'error');
+      }
+    }
+    handleMenuClose();
+  };
+
+  const toggleOrdenacao = (campo) => {
+    if (campoOrdenacao === campo) {
+      setOrdemDirecao(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setCampoOrdenacao(campo);
+      setOrdemDirecao('desc');
+    }
   };
 
   // Reseta o limite para 20 sempre que os filtros mudarem
@@ -330,6 +489,7 @@ export default function App() {
     setSelectedTipos([]);
     setSelectedContas([]);
     setOrdemDirecao('desc');
+    setCampoOrdenacao('data');
     setLimiteExibicao(20);
     showToast('Filtros redefinidos com sucesso');
   };
@@ -349,16 +509,22 @@ export default function App() {
     return gastosFiltrados.reduce((sum, g) => sum + g.valor, 0);
   }, [gastosFiltrados]);
 
-  // Ordena os gastos por data memorizado
+  // Ordena os gastos por data/valor memorizado
   const gastosOrdenados = useMemo(() => {
     return [...gastosFiltrados].sort((a, b) => {
-      const dataA = a.data || '';
-      const dataB = b.data || '';
-      if (dataA < dataB) return ordemDirecao === 'asc' ? -1 : 1;
-      if (dataA > dataB) return ordemDirecao === 'asc' ? 1 : -1;
-      return 0;
+      if (campoOrdenacao === 'data') {
+        const dataA = a.data || '';
+        const dataB = b.data || '';
+        if (dataA < dataB) return ordemDirecao === 'asc' ? -1 : 1;
+        if (dataA > dataB) return ordemDirecao === 'asc' ? 1 : -1;
+        return 0;
+      } else {
+        const valorA = a.valor || 0;
+        const valorB = b.valor || 0;
+        return ordemDirecao === 'asc' ? valorA - valorB : valorB - valorA;
+      }
     });
-  }, [gastosFiltrados, ordemDirecao]);
+  }, [gastosFiltrados, campoOrdenacao, ordemDirecao]);
 
   // Fatiamento de exibição limite de 20 (baseado na paginação)
   const gastosExibidos = useMemo(() => {
@@ -383,7 +549,7 @@ export default function App() {
   return (
     <Container maxWidth="lg" sx={{ py: 5 }}>
       {/* Toast Snackbar */}
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
+      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} variant="filled" sx={{ width: '100%' }}>
           {snackbar.message}
         </Alert>
@@ -706,9 +872,9 @@ export default function App() {
                     <TableRow>
                       <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>
                         <TableSortLabel
-                          active={true}
+                          active={campoOrdenacao === 'data'}
                           direction={ordemDirecao}
-                          onClick={toggleOrdenacaoData}
+                          onClick={() => toggleOrdenacao('data')}
                           sx={{
                             '&.Mui-active': { color: 'text.secondary' },
                             '& .MuiTableSortLabel-icon': { color: 'primary.main !important' }
@@ -720,7 +886,19 @@ export default function App() {
                       <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Descrição</TableCell>
                       <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Categoria</TableCell>
                       <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Conta</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600, color: 'text.secondary' }}>Valor</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                        <TableSortLabel
+                          active={campoOrdenacao === 'valor'}
+                          direction={ordemDirecao}
+                          onClick={() => toggleOrdenacao('valor')}
+                          sx={{
+                            '&.Mui-active': { color: 'text.secondary' },
+                            '& .MuiTableSortLabel-icon': { color: 'primary.main !important' }
+                          }}
+                        >
+                          Valor
+                        </TableSortLabel>
+                      </TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -732,7 +910,15 @@ export default function App() {
                       </TableRow>
                     ) : (
                       gastosExibidos.map((g) => (
-                        <TableRow key={g.id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                        <TableRow 
+                          key={g.id} 
+                          hover 
+                          onClick={(e) => handleRowClick(e, g)}
+                          sx={{ 
+                            '&:last-child td, &:last-child th': { border: 0 },
+                            cursor: 'pointer' 
+                          }}
+                        >
                           <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
                             {g.data ? new Date(g.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'Sem data'}
                           </TableCell>
@@ -797,7 +983,10 @@ export default function App() {
         <Fab 
           color="primary" 
           aria-label="add" 
-          onClick={() => setFormAberto(true)}
+          onClick={() => {
+            setGastoParaEditar(null);
+            setFormAberto(true);
+          }}
           sx={{ 
             position: 'fixed', 
             bottom: 24, 
@@ -828,7 +1017,10 @@ export default function App() {
           <CardContent sx={{ p: 3, position: 'relative' }}>
             {/* Ícone de Fechar */}
             <IconButton 
-              onClick={() => setFormAberto(false)}
+              onClick={() => {
+                setFormAberto(false);
+                setGastoParaEditar(null);
+              }}
               sx={{ position: 'absolute', top: 12, right: 12, color: 'text.secondary' }}
               aria-label="close"
             >
@@ -838,15 +1030,19 @@ export default function App() {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5, pr: 4 }}>
               <AddCircleIcon sx={{ color: 'success.main' }} />
               <Typography variant="h6" component="h2" color="text.primary" sx={{ fontSize: '1.1rem' }}>
-                Adicionar Novo Gasto
+                {gastoParaEditar ? 'Editar Gasto' : 'Adicionar Novo Gasto'}
               </Typography>
             </Box>
 
             <CadastroGastoForm
               metadados={metadados}
-              onSuccess={(msg) => {
+              gastoParaEditar={gastoParaEditar}
+              onSuccess={(msg, isEdit) => {
                 showToast(msg);
-                setFormAberto(false);
+                if (isEdit) {
+                  setFormAberto(false);
+                  setGastoParaEditar(null);
+                }
                 fetchDados(false);
               }}
               onCancel={(msg) => {
@@ -856,6 +1052,127 @@ export default function App() {
           </CardContent>
         </Card>
       </Zoom>
+
+      {/* Modal de Detalhes do Gasto */}
+      <Dialog 
+        open={modalDetalhesAberto} 
+        onClose={() => setModalDetalhesAberto(false)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            p: 1,
+            boxShadow: '0 12px 40px rgba(0,0,0,0.12)'
+          }
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
+          <Typography variant="h6" component="div" sx={{ fontWeight: 700, color: 'primary.main' }}>
+            Detalhes do Lançamento
+          </Typography>
+          <IconButton onClick={() => setModalDetalhesAberto(false)} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ py: 2 }}>
+          {selectedGasto && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                  Descrição / Item
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: 500, color: 'text.primary', mt: 0.5 }}>
+                  {selectedGasto.nome}
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+                    Valor
+                  </Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mt: 0.5 }}>
+                    R$ {selectedGasto.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600, display: 'block' }}>
+                    Data
+                  </Typography>
+                  <Typography variant="body1" sx={{ mt: 0.5, color: 'text.primary', fontWeight: 500 }}>
+                    {selectedGasto.data ? new Date(selectedGasto.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'Sem data'}
+                  </Typography>
+                </Box>
+              </Box>
+
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600, display: 'block', mb: 0.5 }}>
+                    Categoria
+                  </Typography>
+                  {(() => {
+                    const cores = gerarCorPorString(selectedGasto.tipo || 'Sem Categoria');
+                    return (
+                      <Chip 
+                        label={selectedGasto.tipo || 'Sem Categoria'} 
+                        size="small" 
+                        sx={{ 
+                          bgcolor: cores.bg, 
+                          border: `1px solid ${cores.border}`, 
+                          color: cores.text,
+                          fontWeight: 500
+                        }} 
+                      />
+                    );
+                  })()}
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', fontWeight: 600, display: 'block', mb: 0.5 }}>
+                    Conta Financeira
+                  </Typography>
+                  <Chip 
+                    label={selectedGasto.conta} 
+                    size="small" 
+                    sx={{ 
+                      bgcolor: 'rgba(85, 107, 47, 0.06)', 
+                      border: '1px solid rgba(85, 107, 47, 0.12)', 
+                      color: 'secondary.main',
+                      fontWeight: 500
+                    }} 
+                  />
+                </Box>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 2, py: 1.5, justifyContent: 'space-between' }}>
+          <Button 
+            variant="outlined" 
+            color="error" 
+            startIcon={<DeleteIcon />}
+            onClick={handleExcluirClick}
+          >
+            Excluir
+          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button 
+              variant="outlined" 
+              color="primary" 
+              startIcon={<EditIcon />}
+              onClick={handleEditarDoModal}
+            >
+              Editar
+            </Button>
+            <Button 
+              variant="contained" 
+              onClick={() => setModalDetalhesAberto(false)}
+            >
+              Fechar
+            </Button>
+          </Box>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }

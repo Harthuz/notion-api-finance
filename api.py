@@ -149,18 +149,31 @@ def create_gasto(gasto: GastoCreate):
 
 @app.get("/api/metadados")
 def get_metadados():
-    # Opções obtidas a partir da análise dos registros existentes na base
-    tipos = [
+    fallback_tipos = [
         "Alimentação", "Lanche/Doces", "Mercado", "Transporte", "Saúde", "Academia",
         "Cuidados Pessoais", "Vestuário", "Cosméticos", "Entretenimento e Lazer", 
         "Jogo", "Livro", "Softwares", "Internet", "Escola", "Profissional", 
         "Presente", "Eletrodomésticos", "Eletrônicos", "Parcelas de Compras", "Seguro", "Esporte"
     ]
-    contas = [
+    fallback_contas = [
         "Crédito Nubank", "Conta Nubank", "Conta Banco Do Brasil", 
         "Cartão Alimentação iFood", "Cartão Mobilidade iFood"
     ]
-    return {"tipos": tipos, "contas": contas}
+    try:
+        # Busca os gastos atuais para mapear quais categorias/contas já existem
+        gastos = get_gastos()
+        
+        tipos_reais = set(g["tipo"] for g in gastos if g.get("tipo"))
+        contas_reais = set(g["conta"] for g in gastos if g.get("conta"))
+        
+        # Une as opções cadastradas com as padrões para histórico completo
+        tipos = sorted(list(tipos_reais.union(set(fallback_tipos))))
+        contas = sorted(list(contas_reais.union(set(fallback_contas))))
+        
+        return {"tipos": tipos, "contas": contas}
+    except Exception as e:
+        print(f"Erro ao computar metadados da base: {e}")
+        return {"tipos": sorted(fallback_tipos), "contas": sorted(fallback_contas)}
 
 @app.get("/api/exportar")
 def exportar_csv():
@@ -212,3 +225,67 @@ def exportar_csv():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao exportar CSV: {str(e)}")
+
+class GastoUpdate(BaseModel):
+    nome: str
+    valor: float
+    tipo: str
+    conta: str
+    data: str  # Formato YYYY-MM-DD
+
+@app.patch("/api/gastos/{gasto_id}")
+def update_gasto(gasto_id: str, gasto: GastoUpdate):
+    try:
+        properties = {
+            "Name": {
+                "title": [
+                    {
+                        "text": {
+                            "content": gasto.nome
+                        }
+                    }
+                ]
+            },
+            "Valor": {
+                "number": gasto.valor
+            }
+        }
+
+        if gasto.tipo:
+            properties["Tipo"] = {
+                "select": {
+                    "name": gasto.tipo
+                }
+            }
+
+        if gasto.conta:
+            properties["Conta"] = {
+                "select": {
+                    "name": gasto.conta
+                }
+            }
+
+        if gasto.data:
+            properties["Date"] = {
+                "date": {
+                    "start": gasto.data
+                }
+            }
+
+        notion.pages.update(page_id=gasto_id, properties=properties)
+        return {"status": "success", "message": "Gasto atualizado com sucesso"}
+    except APIResponseError as e:
+        raise HTTPException(status_code=400, detail=f"Erro da API do Notion: {e.message}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/gastos/{gasto_id}")
+def delete_gasto(gasto_id: str):
+    try:
+        notion.pages.update(page_id=gasto_id, archived=True)
+        return {"status": "success", "message": "Gasto excluído com sucesso"}
+    except APIResponseError as e:
+        raise HTTPException(status_code=400, detail=f"Erro da API do Notion: {e.message}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
